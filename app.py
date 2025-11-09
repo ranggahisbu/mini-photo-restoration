@@ -6,7 +6,7 @@ from PIL import Image
 st.set_page_config(page_title="Photo Restoration App", page_icon="🪄", layout="centered")
 
 st.title("🪄 Aplikasi Restorasi Foto Lama")
-st.write("Perbaiki foto lama dari noise, goresan, blur, dan pudar dengan teknik preprocessing citra dasar.")
+st.write("Perbaiki foto lama dari noise, goresan, blur, dan pudar dengan hasil yang natural (tidak overprocess).")
 
 uploaded_file = st.file_uploader("Unggah foto lama kamu", type=["jpg", "jpeg", "png"])
 
@@ -21,12 +21,12 @@ if uploaded_file is not None:
         gray = img
 
     # --- 2️⃣ Filtering (Median + Gaussian Blur)
-    # Gunakan kombinasi untuk hilangkan bintik halus tapi tetap tajam
     median_filtered = cv2.medianBlur(gray, 3)
     gaussian_filtered = cv2.GaussianBlur(median_filtered, (5, 5), 0)
 
-    # --- 3️⃣ Histogram Equalization (meningkatkan kontras)
-    equalized = cv2.equalizeHist(gaussian_filtered)
+    # --- 3️⃣ Histogram Equalization pakai CLAHE (biar gak over)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    equalized = clahe.apply(gaussian_filtered)
 
     # --- 4️⃣ Operasi Geometri (Crop / Rotate)
     st.write("### ✂️ Pengaturan Geometri")
@@ -45,26 +45,32 @@ if uploaded_file is not None:
     y_start = int(h * (crop_y / 100))
     cropped = rotated[y_start:, x_start:]
 
-    # --- Konversi ke BGR sebelum detailEnhance (karena image sekarang grayscale)
-    color_restored = cv2.cvtColor(cropped, cv2.COLOR_GRAY2BGR)
+    # --- Denoising ringan biar hasil lembut
+    denoised = cv2.fastNlMeansDenoising(cropped, h=10)
 
-    # --- Post-processing ringan untuk hasil halus (tanpa overprocess)
-    restored = cv2.detailEnhance(color_restored, sigma_s=10, sigma_r=0.15)
+    # --- Konversi ke BGR sebelum detailEnhance
+    color_restored = cv2.cvtColor(denoised, cv2.COLOR_GRAY2BGR)
+
+    # --- DetailEnhance dengan pengaturan lembut
+    restored_soft = cv2.detailEnhance(color_restored, sigma_s=5, sigma_r=0.1)
+
+    # --- Blend hasil supaya natural (70% hasil + 30% original)
+    blended = cv2.addWeighted(color_restored, 0.3, restored_soft, 0.7, 0)
 
     # Gabung tampilan
-    st.write("### 🔧 Hasil Restorasi")
-    st.image(restored, caption="Foto Setelah Restorasi", use_container_width=True)
+    st.write("### 🔧 Hasil Restorasi (Natural Mode)")
+    st.image(blended, caption="Foto Setelah Restorasi", use_container_width=True)
 
     # Tombol simpan
-    result_img = Image.fromarray(restored)
+    result_img = Image.fromarray(blended)
     st.download_button(
         label="💾 Unduh Hasil Restorasi",
-        data=cv2.imencode('.jpg', restored)[1].tobytes(),
-        file_name="restored_photo.jpg",
+        data=cv2.imencode('.jpg', blended)[1].tobytes(),
+        file_name="restored_photo_natural.jpg",
         mime="image/jpeg"
     )
 else:
     st.info("Silakan unggah foto lama untuk memulai restorasi.")
 
 st.markdown("---")
-st.caption("🧠 Menggunakan teknik preprocessing: Grayscale, Filtering, Histogram Equalization, dan Geometri")
+st.caption("🧠 Teknik: Grayscale, Filtering, CLAHE, Denoising, dan Operasi Geometri (Natural Restoration Mode)")
